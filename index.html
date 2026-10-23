@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Personal Tasks</title>
+
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 24px 14px;
+      font-family: Arial, sans-serif;
+      background: #f3f5f9;
+      color: #202534;
+    }
+
+    .container {
+      max-width: 650px;
+      margin: 0 auto;
+    }
+
+    h1 { margin-bottom: 6px; }
+    .subtitle { color: #687080; margin-top: 0; }
+
+    .panel {
+      background: white;
+      padding: 20px;
+      margin: 18px 0;
+      border-radius: 14px;
+      box-shadow: 0 3px 12px rgba(0,0,0,0.06);
+    }
+
+    input, textarea, button {
+      width: 100%;
+      padding: 12px;
+      margin: 6px 0;
+      border-radius: 8px;
+      font: inherit;
+    }
+
+    input, textarea {
+      border: 1px solid #d5d9e2;
+      background: white;
+      color: #202534;
+    }
+
+    button {
+      border: 0;
+      background: #315efb;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button:disabled { opacity: 0.55; cursor: wait; }
+
+    button.secondary {
+      background: #e9edf5;
+      color: #202534;
+    }
+
+    button.danger { background: #b42318; }
+
+    .row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .row > * { flex: 1; min-width: 0; }
+
+    .task {
+      border: 1px solid #e1e5ed;
+      border-radius: 10px;
+      padding: 12px;
+      margin-top: 10px;
+      overflow-wrap: anywhere;
+    }
+
+    .task-title { font-weight: bold; }
+    .task.completed .task-title {
+      text-decoration: line-through;
+      color: #788091;
+    }
+
+    .task-description {
+      color: #687080;
+      white-space: pre-wrap;
+    }
+
+    .task-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .task-actions button {
+      margin-bottom: 0;
+      padding: 9px 5px;
+      font-size: 13px;
+    }
+
+    .status {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .muted { color: #687080; font-size: 14px; }
+    [hidden] { display: none !important; }
+
+    @media (max-width: 420px) {
+      .row { flex-direction: column; gap: 0; }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="container">
+    <h1>My Personal Tasks</h1>
+    <p class="subtitle">Your tasks, organized in one place.</p>
+
+    <section class="panel">
+      <h2>My Account</h2>
+
+      <form id="authForm">
+        <label for="email">Email address</label>
+        <input id="email" type="email" autocomplete="email"
+          placeholder="you@example.com" required>
+
+        <label for="password">Password</label>
+        <input id="password" type="password"
+          autocomplete="current-password"
+          placeholder="At least 6 characters" minlength="6" required>
+
+        <div class="row">
+          <button id="loginButton" type="submit">Sign In</button>
+          <button id="signupButton" type="button">Create Account</button>
+        </div>
+      </form>
+
+      <button id="logoutButton" class="secondary" type="button" hidden>
+        Sign Out
+      </button>
+
+      <p id="authMessage" class="status" role="status">
+        Sign in or create an account to sync your tasks.
+      </p>
+    </section>
+
+    <section class="panel">
+      <h2>My Tasks</h2>
+      <p id="taskNotice" class="muted">
+        Sign in to load your saved tasks.
+      </p>
+
+      <form id="taskForm" hidden>
+        <label for="taskTitle">Task name</label>
+        <input id="taskTitle" maxlength="200"
+          placeholder="What do you need to do?" required>
+
+        <label for="taskDescription">Notes (optional)</label>
+        <textarea id="taskDescription" rows="3" maxlength="2000"
+          placeholder="Add details..."></textarea>
+
+        <button id="saveTaskButton" type="submit">Add Task</button>
+        <button id="cancelEditButton" class="secondary"
+          type="button" hidden>Cancel Edit</button>
+      </form>
+
+      <div id="taskList"></div>
+    </section>
+  </main>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+
+  <script>
+    "use strict";
+
+    // Replace these six values with your Firebase web app configuration.
+    const firebaseConfig = {
+     apiKey: "AIzaSyDiD8KbSFCla7Higx2V79xE9rvzTvvJlGo",
+  authDomain: "my-personal-app-sync.firebaseapp.com",
+  projectId: "my-personal-app-sync",
+  storageBucket: "my-personal-app-sync.firebasestorage.app",
+  messagingSenderId: "686758084104",
+  appId: "1:686758084104:web:c5e36b5220622d10369bbd",
+  measurementId: "G-6C03Y1TLRW"
+    };
+
+    const authForm = document.getElementById("authForm");
+    const emailInput = document.getElementById("email");
+    const passwordInput = document.getElementById("password");
+    const loginButton = document.getElementById("loginButton");
+    const signupButton = document.getElementById("signupButton");
+    const logoutButton = document.getElementById("logoutButton");
+    const authMessage = document.getElementById("authMessage");
+
+    const taskForm = document.getElementById("taskForm");
+    const taskTitle = document.getElementById("taskTitle");
+    const taskDescription = document.getElementById("taskDescription");
+    const saveTaskButton = document.getElementById("saveTaskButton");
+    const cancelEditButton = document.getElementById("cancelEditButton");
+    const taskList = document.getElementById("taskList");
+    const taskNotice = document.getElementById("taskNotice");
+
+    let currentUser = null;
+    let taskCollection = null;
+    let unsubscribeTasks = null;
+    let editingTaskId = null;
+    let busy = false;
+
+    function showAuthMessage(message) {
+      authMessage.textContent = message;
+    }
+
+    function firebaseErrorMessage(error) {
+      const messages = {
+        "auth/invalid-api-key":
+          "Your Firebase API key is invalid. Check your Firebase configuration.",
+        "auth/unauthorized-domain":
+          "This website domain is not authorized in Firebase Authentication settings.",
+        "auth/network-request-failed":
+          "Network request failed. Check your internet connection and try again.",
+        "auth/email-already-in-use":
+          "An account already exists with this email. Try signing in.",
+        "auth/invalid-email":
+          "Please enter a valid email address.",
+        "auth/weak-password":
+          "Choose a stronger password with at least 6 characters.",
+        "auth/invalid-credential":
+          "Email or password is incorrect, or the account could not be verified.",
+        "auth/operation-not-allowed":
+          "Enable Email/Password sign-in in Firebase Authentication.",
+        "permission-denied":
+          "Firestore denied access. Check your Firestore security rules."
+      };
+
+      return messages[error.code] ||
+        (error.message || "Something went wrong.") +
+        " [" + (error.code || "unknown error") + "]";
+    }
+
+    function setBusy(value) {
+      busy = value;
+      loginButton.disabled = value;
+      signupButton.disabled = value;
+      logoutButton.disabled = value;
+    }
+
+    function checkFirebaseConfig() {
+      if (Object.values(firebaseConfig).some(function (value) {
+        return !value || value.startsWith("YOUR_");
+      })) {
+        showAuthMessage(
+          "Setup needed: add your real Firebase configuration values in index.html."
+        );
+        return false;
+      }
+
+      if (!firebase.apps.length) {
+        firebase.initializeApp(firebaseConfig);
+      }
+
+      return true;
+    }
+
+    function stopTaskListener() {
+      if (unsubscribeTasks) {
+        unsubscribeTasks();
+        unsubscribeTasks = null;
+      }
+    }
+
+    function resetTaskForm() {
+      editingTaskId = null;
+      taskForm.reset();
+      saveTaskButton.textContent = "Add Task";
+      cancelEditButton.hidden = true;
+    }
+
+    function clearTasks(message) {
+      taskList.replaceChildren();
+      taskNotice.textContent = message;
+    }
+
+    function addTaskText(parent, className, value) {
+      const element = document.createElement("div");
+      element.className = className;
+      element.textContent = value || "";
+      parent.appendChild(element);
+      return element;
+    }
+
+    function renderTasks(snapshot) {
+      taskList.replaceChildren();
+
+      if (snapshot.empty) {
+        taskNotice.textContent = "No tasks yet. Add your first task!";
+        return;
+      }
+
+      taskNotice.textContent = snapshot.size + " task(s)";
+
+      snapshot.forEach(function (documentSnapshot) {
+        const data = documentSnapshot.data();
+        const id = documentSnapshot.id;
+
+        const card = document.createElement("article");
+        card.className = "task" + (data.completed ? " completed" : "");
+
+        addTaskText(card, "task-title", data.title);
+        if (data.description) {
+          addTaskText(card, "task-description", data.description);
+        }
+
+        const actions = document.createElement("div");
+        actions.className = "task-actions";
+
+        const completeButton = document.createElement("button");
+        completeButton.type = "button";
+        completeButton.textContent = data.completed ? "Reopen" : "Complete";
+        completeButton.addEventListener("click", async function () {
+          try {
+            await taskCollection.doc(id).update({
+              completed: !data.completed
+            });
+          } catch (error) {
+            showAuthMessage(firebaseErrorMessage(error));
+          }
+        });
+
+        const editButton = document.createElement("button");
+        editButton.type = "button";
+        editButton.className = "secondary";
+        editButton.textContent = "Edit";
+        editButton.addEventListener("click", function () {
+          editingTaskId = id;
+          taskTitle.value = data.title || "";
+          taskDescription.value = data.description || "";
+          saveTaskButton.textContent = "Save Changes";
+          cancelEditButton.hidden = false;
+          taskTitle.focus();
+        });
+
+        const deleteButton = document.createElement("button");
+        deleteButton.type = "button";
+        deleteButton.className = "danger";
+        deleteButton.textContent = "Delete";
+        deleteButton.addEventListener("click", async function () {
+          if (!window.confirm("Delete this task?")) return;
+
+          try {
+            await taskCollection.doc(id).delete();
+            if (editingTaskId === id) resetTaskForm();
+          } catch (error) {
+            showAuthMessage(firebaseErrorMessage(error));
+          }
+        });
+
+        actions.append(completeButton, editButton, deleteButton);
+        card.appendChild(actions);
+        taskList.appendChild(card);
+      });
+    }
+
+    function startTaskListener(user) {
+      stopTaskListener();
+      resetTaskForm();
+      clearTasks("Loading your tasks...");
+
+      taskCollection = firebase.firestore()
+        .collection("users")
+        .doc(user.uid)
+        .collection("tasks");
+
+      unsubscribeTasks = taskCollection.onSnapshot(
+        renderTasks,
+        function (error) {
+          clearTasks("Could not load tasks.");
+          showAuthMessage(firebaseErrorMessage(error));
+        }
+      );
+    }
+
+    authForm.addEventListener("submit", async function (event) {
+      event.preventDefault();
+      if (busy) return;
+
+      if (!checkFirebaseConfig()) return;
+
+      setBusy(true);
+      showAuthMessage("Signing in...");
+
+      try {
+        await firebase.auth().signInWithEmailAndPassword(
+          emailInput.value.trim(),
+          passwordInput.value
+        );
+        showAuthMessage("Signed in successfully!");
+      } catch (error) {
+        showAuthMessage(firebaseErrorMessage(error));
+      } finally {
+        setBusy(false);
+      }
+    });
+
+    signupButton.addEventListener("click", async function () {
+      if (busy) return;
+
+      if (!authForm.reportValidity()) return;
+      if (!checkFirebaseConfig()) return;
+
+      setBusy(true);
+      showAuthMessage("Creating account...");
+
+      try {
+        await firebase.auth().createUserWithEmailAndPassword(
+          emailInput.value.trim(),
+          passwordInput.value
+        );
+        showAuthMessage("Account created successfully!");
+      } catch (error) {
+        showAuthMessage(firebaseErrorMessage(error));
+      } finally {
+        setBusy(false);
+      }
+    });
+
+    logoutButton.addEventListener("click", async function () {
+      if (busy) return;
+
+      setBusy(true);
+      try {
+        await firebase.auth().signOut();
+        showAuthMessage("Signed out.");
+      } catch (error) {
+        showAuthMessage(firebaseErrorMessage(error));
+      } finally {
+        setBusy(false);
+      }
+    });
+
+    cancelEditButton.addEventListener("click", resetTaskForm);
+
+    taskForm.addEventListener("submit", async function (event) {
+      event.preventDefault();
+      if (!currentUser || !taskCollection) return;
+
+      const title = taskTitle.value.trim();
+      const description = taskDescription.value.trim();
+
+      if (!title) {
+        taskTitle.focus();
+        return;
+      }
+
+      saveTaskButton.disabled = true;
+
+      try {
+        const taskData = {
+          title: title,
+          description: description,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+
+        if (editingTaskId) {
+          await taskCollection.doc(editingTaskId).update(taskData);
+        } else {
+          taskData.completed = false;
+          taskData.createdAt =
+            firebase.firestore.FieldValue.serverTimestamp();
+          await taskCollection.add(taskData);
+        }
+
+        resetTaskForm();
+      } catch (error) {
+        showAuthMessage(firebaseErrorMessage(error));
+      } finally {
+        saveTaskButton.disabled = false;
+      }
+    });
+
+    if (checkFirebaseConfig()) {
+      firebase.auth().onAuthStateChanged(function (user) {
+        currentUser = user || null;
+
+        authForm.hidden = Boolean(user);
+        logoutButton.hidden = !user;
+        taskForm.hidden = !user;
+
+        if (user) {
+          showAuthMessage("Signed in as " + user.email);
+          startTaskListener(user);
+        } else {
+          stopTaskListener();
+          taskCollection = null;
+          resetTaskForm();
+          clearTasks("Sign in to load your saved tasks.");
+          showAuthMessage("Sign in or create an account to sync your tasks.");
+        }
+      });
+    }
+  </script>
+</body>
+</html>
